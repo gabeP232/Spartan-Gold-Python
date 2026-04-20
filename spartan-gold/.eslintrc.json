@@ -1,0 +1,17 @@
+{
+  "env": {
+    "commonjs": true,
+    "es2020": true,
+    "mocha": true,
+    "node": true
+  },
+  "extends": "eslint:recommended",
+  "globals": {
+  },
+  "rules": {
+    "no-console": 0,
+    "semi": "error",
+    "no-debugger": "error",
+    "radix": "error"
+  }
+}
