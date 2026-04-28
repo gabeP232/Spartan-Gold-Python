@@ -1,0 +1,215 @@
+MISSING_BLOCK = "MISSING_BLOCK"
+POST_TRANSACTION = "POST_TRANSACTION"
+PROOF_FOUND = "PROOF_FOUND"
+START_MINING = "START_MINING"
+
+NUM_ROUNDS_MINING = 2000
+
+POW_BASE_TARGET = int("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
+POW_LEADING_ZEROES = 15
+
+COINBASE_AMT_ALLOWED = 25
+DEFAULT_TX_FEE = 1
+
+CONFIRMED_DEPTH = 6
+
+class BlockchainMeta(type):
+    @property
+    def POW_TARGET(cls):
+        return cls.get_instance().pow_target
+
+    @property
+    def COINBASE_AMT_ALLOWED(cls):
+        return cls.get_instance().coinbase_reward
+
+    @property
+    def DEFAULT_TX_FEE(cls):
+        return cls.get_instance().default_tx_fee
+
+    @property
+    def CONFIRMED_DEPTH(cls):
+        return cls.get_instance().confirmed_depth
+
+class Blockchain(metaclass = BlockchainMeta):
+    _instance = None
+
+    MISSING_BLOCK = MISSING_BLOCK
+    POST_TRANSACTION = POST_TRANSACTION
+    PROOF_FOUND = PROOF_FOUND
+    START_MINING = START_MINING
+    NUM_ROUNDS_MINING = NUM_ROUNDS_MINING
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            raise RuntimeError("The blockchain has not been initialized.")
+        return cls._instance
+
+    @classmethod
+    def has_instance(cls):
+        return cls._instance is not None
+
+    @classmethod
+    def reset_instance(cls):
+        cls._instance = None
+
+    @classmethod
+    def create_instance(cls, cfg):
+        cls._instance = Blockchain(cfg)
+        cls._instance.genesis = cls.make_genesis()
+        return cls._instance
+
+    @classmethod
+    def make_genesis(cls):
+        bc = cls.get_instance()
+        g = cls.make_block()
+        g.balances = dict(bc.initial_balances)
+        for client in bc.clients:
+            client.set_genesis_block(g)
+        return g
+
+    @classmethod
+    def make_block(cls, *args):
+        return cls.get_instance()._make_block(*args)
+
+    @classmethod
+    def make_transaction(cls, o):
+        return cls.get_instance()._make_transaction(o)
+
+    @classmethod
+    def deserialize_block(cls, o):
+        bc = cls.get_instance()
+        if isinstance(o, bc.block_class):
+            return o
+
+        b = bc.block_class.__new__(bc.block_class)
+        b.balances = {}
+        b.next_nonce = {}
+        b.transactions = {}
+        b.proof = None
+        b.prev_block_hash = None
+        b.reward_addr = None
+        b.target = bc.pow_target
+        b.coinbase_reward = bc.coinbase_reward
+
+        b.chain_length = int(o['chainlength'])
+        b.timestamp = o['timestamp']
+
+        if b.is_genesis_block():
+            for client_id, amount in o['balances']:
+                b.balances[client_id] = amount
+        else:
+            b.prev_block_hash = o['prev_block_hash']
+            b.proof = o['proof']
+            b.reward_addr = o['reward_addr']
+            b.transactions = {}
+            for tx_id, tx_json in (o.get('transactions') or []):
+                tx = cls.make_transaction(tx_json)
+                b.transactions[tx_id] = tx
+
+        return b
+
+    def __init__(self, cfg):
+        import block as block_module
+        import transaction as tx_module
+        import client as client_module
+        import miner as miner_module
+
+        self.block_class = cfg.get('blockClass') or block_module.Block
+        self.transaction_class = cfg.get('transactionClass') or tx_module.Transaction
+        self.client_class = cfg.get('clientClass') or client_module.Client
+        self.miner_class = cfg.get('minerClass') or miner_module.Miner
+
+        self.clients = []
+        self.miners = []
+        self.client_address_map = {}
+        self.client_name_map = {}
+        self.net = cfg.get('net')
+
+        pow_leading_zeroes = cfg.get('powLeadingZeroes', POW_LEADING_ZEROES)
+        self.coinbase_reward = cfg.get('coinbaseAmount', COINBASE_AMT_ALLOWED)
+        self.default_tx_fee = cfg.get('defaultTxFee', DEFAULT_TX_FEE)
+        self.confirmed_depth = cfg.get('confirmedDepth', CONFIRMED_DEPTH)
+        self.pow_target = POW_BASE_TARGET >> pow_leading_zeroes
+
+        self.initial_balances = {}
+
+        mnemonic = cfg.get('mnemonic')
+        if mnemonic is None:
+            from mnemonic import Mnemonic
+            mnemo = Mnemonic("english")
+            self.mnemonic = mnemo.generate(strength = 256)
+        else:
+            self.mnemonic = mnemonic
+
+        for client_cfg in cfg.get('clients', []):
+            print(f"Adding client {client_cfg['name']}")
+            password = client_cfg.get('password', client_cfg['name]'] + '_pswd')
+            if client_cfg.get('mining'):
+                c = self.miner_class({
+                    'name': client_cfg['name'],
+                    'password': password,
+                    'net': self.net,
+                    'miningRounds': client_cfg.get('miningRounds'),
+                })
+                c.generate_address(self.mnemonic)
+                self.miners.append(c)
+            else:
+                c = self.client_class({
+                    'name': client_cfg['name'],
+                    'password': password,
+                    'net': self.net,
+                })
+                c.generate_address(self.mnemonic)
+
+        self.client_address_map[c.address] = c
+        if c.name:
+            self.client_name_map[c.name] = c
+        self.clients.append(c)
+        self.net.register(c)
+        self.initial_balances[c.address] = client_cfg['amount']
+
+    def _make_block(self, *args):
+        return self.block_class(*args)
+
+    def _make_transaction(self, o):
+        if isinstance(o, self.transaction_class):
+            return o
+        return self.transaction_class(o)
+
+    def show_balances(self, name = None):
+        client = self.client_name_map.get(name) if name else (self.clients[0] if self.clients else None)
+        if not client:
+            raise RuntimeError("No client found.")
+        client.show_all_balances()
+
+    def start(self, ms = None, callback = None):
+        import threading
+        for miner in self.miners:
+            miner.initialize()
+
+        if ms is not None:
+            def _stop():
+                if callback:
+                    callback()
+                import os
+                os._exit(0)
+            threading.Timer(ms / 1000, _stop).start()
+
+    def get_clients(self, *names):
+        return [self.client_name_map.get(n) for n in names]
+
+    def register(self, *clients):
+        for c in clients:
+            self.client_address_map[c.address] = c
+            if c.name:
+                self.client_name_map[c.name] = c
+            self.clients.append(c)
+            if isinstance(c, self.miner_class):
+                self.miners.append(c)
+            c.net = self.net
+            self.net.register(c)
+
+    def get_client_name(self, address):
+        c = self.client_address_map.get(address)
+        return c.name if c else None
