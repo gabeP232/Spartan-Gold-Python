@@ -218,7 +218,59 @@ class Blockchain(metaclass = BlockchainMeta):
             self.clients.append(c)
             self.net.register(c)
             self.initial_balances[c.address] = client_cfg['amount']
+    
+    
+    ### Implementing Dynamic Difficulty for POW Target ###    
+    def calculate_target(cls, prev_block):
+        bc = cls.get_instance()
+        interval = DIFFICULTY_ADJUSTMENT_INTERVAL
+        
+        # IF not enough history, use default/curr target
+        if prev_block.chain_length < interval:
+            return bc.pow_target
+        
+        window_start = prev_block
+        
+        # Get the block that is exactly 'interval' steps behind the prev_block
+        # until it goes to the first block of the window
+        for _ in range(interval - 1):
+            parent_hash = window_start.prev_block_hash
+            if parent_hash is None:
+                # is genesis, keep curr target 
+                return bc.pow_target
+            
+            # look up blocks from the first miner
+            if bc.miners:
+                window_start = bc.miners[0].blocks.get(parent_hash)
+            else: window_start = None
+    
+            if window_start is None:
+                return bc.pow_target
+            
+        actual_time_ms = prev_block.timestamp - window_start.timestamp
+        expected_time_ms = interval * TARGET_BLOCK_TIME
+        
+        # To avoid division by 0 if the timestamps might be identical
+        if actual_time_ms <= 0:
+            actual_time_ms = 1
+        
+        old_target = bc.pow_target
+        
+        #start scaling
+        # if actual time is bigger, the target increases, and mining is easier
+        # if the expected time was exceeded then relax the difficulty
+        new_target = old_target * actual_time_ms // expected_time_ms
+        
+        # Bitcoin clamps it so it doesnt increase by more than 4 in either direction at a time
+        new_target = max(new_target, old_target // 4)
+        new_target = max(new_target, old_target * 4)
+        
+        # Add another clamp for absolute max (no difficulty)
+        bc.pow_target = new_target
+        return new_target
 
+
+    
     def _make_block(self, *args):
         return self.block_class(*args)
 
@@ -249,6 +301,7 @@ class Blockchain(metaclass = BlockchainMeta):
     def get_clients(self, *names):
         return [self.client_name_map.get(n) for n in names]
 
+    # Uses a for loop and dict assigments instead of for each
     def register(self, *clients):
         for c in clients:
             self.client_address_map[c.address] = c
