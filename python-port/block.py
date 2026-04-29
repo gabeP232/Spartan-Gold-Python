@@ -35,6 +35,16 @@ class Block:
         self.timestamp = int(time.time() * 1000)
 
         self.proof = None
+        
+        ### Add check for Dynamic Difficulty for POW ###
+        # After all fields are set, check if the block can be adjusted and recalculate the
+        # PoW based on how fast the last N blocks were mined
+        # Conditions are:
+        # Cant be the genesis block, blockchain instance exists, and the chain_length % interval == 0
+        # Which means it only adjusts every N blocks.
+        #
+        if (prev_block is not None and bc_module.Blockchain.has_instance() and self.chain_length % bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL == 0):
+            self.target = bc_module.Blockchain.calculate_target(prev_block)
 
     def is_genesis_block(self):
         return self.chain_length == 0
