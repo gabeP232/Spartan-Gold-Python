@@ -149,13 +149,16 @@ class Blockchain(metaclass = BlockchainMeta):
 
         return b
 
-    # constrcutor
+    # constructor
+    # Unlike JS, Pythong uses a cfg dict because it doesn't support destructured parameters.
     def __init__(self, cfg):
         import block as block_module
         import transaction as tx_module
         import client as client_module
         import miner as miner_module
-
+        
+        # this allows us to inject custom subclasses
+        # this is useful for implementing the fixed blocksize and 
         self.block_class = cfg.get('blockClass') or block_module.Block
         self.transaction_class = cfg.get('transactionClass') or tx_module.Transaction
         self.client_class = cfg.get('clientClass') or client_module.Client
@@ -163,6 +166,7 @@ class Blockchain(metaclass = BlockchainMeta):
 
         self.clients = []
         self.miners = []
+        
         self.client_address_map = {}
         self.client_name_map = {}
         self.net = cfg.get('net')
@@ -171,10 +175,13 @@ class Blockchain(metaclass = BlockchainMeta):
         self.coinbase_reward = cfg.get('coinbaseAmount', COINBASE_AMT_ALLOWED)
         self.default_tx_fee = cfg.get('defaultTxFee', DEFAULT_TX_FEE)
         self.confirmed_depth = cfg.get('confirmedDepth', CONFIRMED_DEPTH)
+        
+        # In python '>>' int right shift is equivalent without BigInt
         self.pow_target = POW_BASE_TARGET >> pow_leading_zeroes
 
         self.initial_balances = {}
 
+        # use mnemoic library to get bip-39
         mnemonic = cfg.get('mnemonic')
         if mnemonic is None:
             from mnemonic import Mnemonic
@@ -183,9 +190,11 @@ class Blockchain(metaclass = BlockchainMeta):
         else:
             self.mnemonic = mnemonic
 
+        # Register each client in the config, using a for loop instead of for each like in JS
         for client_cfg in cfg.get('clients', []):
             print(f"Adding client {client_cfg['name']}")
-            password = client_cfg.get('password', client_cfg['name]'] + '_pswd')
+            
+            password = client_cfg.get('password', client_cfg['name'] + '_pswd')
             if client_cfg.get('mining'):
                 c = self.miner_class({
                     'name': client_cfg['name'],
@@ -203,12 +212,12 @@ class Blockchain(metaclass = BlockchainMeta):
                 })
                 c.generate_address(self.mnemonic)
 
-        self.client_address_map[c.address] = c
-        if c.name:
-            self.client_name_map[c.name] = c
-        self.clients.append(c)
-        self.net.register(c)
-        self.initial_balances[c.address] = client_cfg['amount']
+            self.client_address_map[c.address] = c
+            if c.name:
+                self.client_name_map[c.name] = c
+            self.clients.append(c)
+            self.net.register(c)
+            self.initial_balances[c.address] = client_cfg['amount']
 
     def _make_block(self, *args):
         return self.block_class(*args)
