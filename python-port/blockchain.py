@@ -22,11 +22,16 @@ CONFIRMED_DEPTH = 6
 
 
 ###### Dynamic Difficulty Adjustment constants ####### additional feature num 1.
-
+#
 # every 10 blocks solved increase difficulty
 DIFFICULTY_ADJUSTMENT_INTERVAL = 10 
 # Time in ms per block (10sec)
 TARGET_BLOCK_TIME = 10000
+
+###### Fixed Block Size constant #####
+#
+# 1 mb like Bitcoins (might change)
+MAX_BLOCK_SIZE_BYTES = 1000000
 
 
 # Instead of static getter methods like JS does, Python uses @property to work on instances
@@ -60,6 +65,8 @@ class Blockchain(metaclass = BlockchainMeta):
     PROOF_FOUND = PROOF_FOUND
     START_MINING = START_MINING
     NUM_ROUNDS_MINING = NUM_ROUNDS_MINING
+    # Add max block size constant
+    MAX_BLOCK_SIZE_BYTES = MAX_BLOCK_SIZE_BYTES
 
     # Singleton accessors, implemented the same pretty much as in JS.
     @classmethod
@@ -131,7 +138,7 @@ class Blockchain(metaclass = BlockchainMeta):
         b.coinbase_reward = bc.coinbase_reward
 
         # key matches block.to_json() 
-        b.chain_length = int(o['chainlength'])
+        b.chain_length = int(o['chainLength'])
         b.timestamp = o['timestamp']
 
         # Python equivalent to o.balances.forEach(([clientID,amount]) => {b.balances.set(clientID, amount);
@@ -143,9 +150,30 @@ class Blockchain(metaclass = BlockchainMeta):
             b.proof = o['proof']
             b.reward_addr = o['rewardAddr']
             b.transactions = {}
+            
+            #### Deserialization for Merkle Root #######
+            # Since header only contains the merkle Root
+            # the full tx is transmitted with to_json() to verify and rerun bals
+            #
+            # After deserializing, verify the received txs produce the actual merkle root
+            # If it doesn't then a tx was tampered with.
+            from merkleTree import MerkleTree
+            
+            # assign to actual merkle root
+            b.merkle_root = o.get('merkleRoot', MerkleTree([]).get_root())
+            
+            # Continue with usual deserialization, receive the txs
             for tx_id, tx_json in (o.get('transactions') or []):
                 tx = cls.make_transaction(tx_json)
                 b.transactions[tx_id] = tx
+            
+            # Verify if the received transactions match the merkle root structure
+            buildRoot = MerkleTree(list(b.transactions.keys())).get_root()
+            if buildRoot != b.merkle_root:
+                raise ValueError(
+                    f"Merkle root mismatch at block {b.chain_length},"
+                    f"Got {buildRoot}, expected {b.merkle_root}"
+                )
 
         return b
 
@@ -221,6 +249,7 @@ class Blockchain(metaclass = BlockchainMeta):
     
     
     ### Implementing Dynamic Difficulty for POW Target ###    
+    @classmethod
     def calculate_target(cls, prev_block):
         bc = cls.get_instance()
         interval = DIFFICULTY_ADJUSTMENT_INTERVAL
@@ -263,7 +292,9 @@ class Blockchain(metaclass = BlockchainMeta):
         
         # Bitcoin clamps it so it doesnt increase by more than 4 in either direction at a time
         new_target = max(new_target, old_target // 4)
-        new_target = max(new_target, old_target * 4)
+        new_target = min(new_target, old_target * 4)
+        
+        new_target = min(new_target, POW_BASE_TARGET)
         
         # Add another clamp for absolute max (no difficulty)
         bc.pow_target = new_target
