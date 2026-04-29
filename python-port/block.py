@@ -17,7 +17,7 @@ class Block:
                 if coinbase_reward is None:
                     coinbase_reward = 25
 
-        self.prev_block_hash = prev_block.hash.val() if prev_block else None
+        self.prev_block_hash = prev_block.id if prev_block else None
         self.target = target
         self.coinbase_reward = coinbase_reward
         self.reward_addr = reward_addr
