@@ -3,15 +3,19 @@ import utils
 
 TX_CONST = "TX"
 
+# For single transactions
+# In JS it uses destructured params for the constructor signature
+# For Python we receive a plain obj or an existing instance of a tx
 class Transaction:
     def __init__(self, obj):
+        # Copies the constructor
         if isinstance(obj, Transaction):
             self.from_addr = obj.from_addr
             self.nonce = obj.nonce
             self.pub_key = obj.pub_key
             self.sig = obj.sig
             self.fee = obj.fee
-            self.outputs = [dict(0) for o in obj.outputs]
+            self.outputs = [dict(o) for o in obj.outputs]
             self.data = dict(obj.data)
         else:
             self.from_addr = obj.get('from')
