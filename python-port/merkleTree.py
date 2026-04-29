@@ -22,6 +22,8 @@ class MerkleTree:
     def __init__(self, tx_ids):
         self._tx_ids = list(tx_ids)
         
+        self._levels = self.build(self._tx_ids)
+        
     # Return merkle root hash
     def get_root(self):
         return
@@ -39,6 +41,33 @@ class MerkleTree:
         return
     
     # Build the merkle tree from the bottom up
+    # tx_ids is the list of tx id strings
+    # returns all levels of the tree
+    # index 0 is leaves, index -1 is root, [] is empty
     @staticmethod
     def _build(tx_ids):
-        return
+        if not tx_ids:
+            return[]
+        
+        # leaf level, hashes each tx_id once
+        curr_level = [utils.hash(tx_id) for tx_id in tx_ids]
+        levels = [curr_level]
+        
+        while len(curr_level ) > 1:
+            next_level = []
+            
+            # Get pairs, duplicate the last node if the count is odd
+            for i in range(0, len(curr_level), 2):
+                left = curr_level[i]
+                
+                # If i + 1 is out of range, duplicate the left node.
+                if i + 1 < len(curr_level):
+                    right = curr_level[i+1]
+                else:
+                    right = left
+                next_level.append(utils.hash(left+right))
+            curr_level = next_level
+            levels.append(curr_level)
+    
+        
+        return levels
