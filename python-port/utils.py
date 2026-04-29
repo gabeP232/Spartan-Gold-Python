@@ -133,9 +133,11 @@ def verify_signatures(pub_key, msg, sig):
         return False
     
 
-
+# Derives wallet address from a pub key by hashing it to base64.
+# Both Python and JS go about it identically, same with address_matches_key
 def calc_address(key):
     return hash(str(key), 'base64')
 
+# Checks if a wallet address exists from the pubkey given.
 def address_matches_key(addr, pubkey):
     return addr == calc_address(pubkey)
