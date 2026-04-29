@@ -106,6 +106,34 @@ def sign(priv_key, msg):
     
     return signature.hex()  # Return hex string to match JS output
 
+# Verify the RSA-sha256 signature on a msg and public key
+#
+# Differences:
+# Similar differences and similarities as the sign func above
+# In JS it passes the hex sig directly into the .verify func
+# In Python we have to decode the hex to bytes first.
+#
+def verify_signatures(pub_key, msg, sig):
+    from Crypto.Signature import pkcs1_15
+    from Crypto.Hash import SHA256
+    from Crypto.PublicKey import RSA
+    
+    
+    if isinstance(msg, (dict, list)):
+        msg_str = json.dumps(msg, separators=(',', ':'))
+    else:
+        msg_str = str(msg)
+ 
+    try:
+        key = RSA.import_key(pub_key)
+        h = SHA256.new(msg_str.encode('utf-8'))
+        pkcs1_15.new(key).verify(h, bytes.fromhex(sig))
+        return True
+    except Exception:
+        return False
+    
+
+
 def calc_address(key):
     return hash(str(key), 'base64')
 
