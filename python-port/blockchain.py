@@ -1,18 +1,36 @@
+
+# Network msg constants
 MISSING_BLOCK = "MISSING_BLOCK"
 POST_TRANSACTION = "POST_TRANSACTION"
 PROOF_FOUND = "PROOF_FOUND"
 START_MINING = "START_MINING"
 
+# num of hash attempts a miner can make per turn
 NUM_ROUNDS_MINING = 2000
 
+# pow target
 POW_BASE_TARGET = int("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", 16)
 POW_LEADING_ZEROES = 15
 
+# mining rewards and tx fee
 COINBASE_AMT_ALLOWED = 25
 DEFAULT_TX_FEE = 1
 
+# If block is 6 blocks older than curr block, confirm it. 
+# Genesis block always confirmed
 CONFIRMED_DEPTH = 6
 
+
+###### Dynamic Difficulty Adjustment constants ####### additional feature num 1.
+
+# every 10 blocks solved increase difficulty
+DIFFICULTY_ADJUSTMENT_INTERVAL = 10 
+# Time in ms per block (10sec)
+TARGET_BLOCK_TIME = 10000
+
+
+# Instead of static getter methods like JS does, Python uses @property to work on instances
+# this gives class-level access without calling a method.
 class BlockchainMeta(type):
     @property
     def POW_TARGET(cls):
@@ -30,7 +48,11 @@ class BlockchainMeta(type):
     def CONFIRMED_DEPTH(cls):
         return cls.get_instance().confirmed_depth
 
+# We use a 'metaclass' here which allows us to define the properties on the class itself
+# Unlike in JS where it stores the instances on the class itself
+# Python uses a private class variable to enforce the global blockchain config object
 class Blockchain(metaclass = BlockchainMeta):
+    # plain class attributes are fine here because these are constants
     _instance = None
 
     MISSING_BLOCK = MISSING_BLOCK
@@ -39,6 +61,7 @@ class Blockchain(metaclass = BlockchainMeta):
     START_MINING = START_MINING
     NUM_ROUNDS_MINING = NUM_ROUNDS_MINING
 
+    # Singleton accessors, implemented the same pretty much as in JS.
     @classmethod
     def get_instance(cls):
         if cls._instance is None:
@@ -53,12 +76,16 @@ class Blockchain(metaclass = BlockchainMeta):
     def reset_instance(cls):
         cls._instance = None
 
+
+    # Production medthods 
     @classmethod
     def create_instance(cls, cfg):
         cls._instance = Blockchain(cfg)
         cls._instance.genesis = cls.make_genesis()
         return cls._instance
 
+    # create genesis block
+    # python 'dict' is slightly faster to iterate than JS 'map' for a small amt of clients
     @classmethod
     def make_genesis(cls):
         bc = cls.get_instance()
@@ -68,6 +95,7 @@ class Blockchain(metaclass = BlockchainMeta):
             client.set_genesis_block(g)
         return g
 
+    # args unpacking here is equivalent to js (...args)
     @classmethod
     def make_block(cls, *args):
         return cls.get_instance()._make_block(*args)
@@ -76,12 +104,22 @@ class Blockchain(metaclass = BlockchainMeta):
     def make_transaction(cls, o):
         return cls.get_instance()._make_transaction(o)
 
+
+    # Deserialize block
+    #
+    # In JS it uses 'new this.instance.BlockClass()' which gets the constrcutor normally
+    # without any args
+    # In Python constructors can't be called as easily so we use '__new__' to allocate
+    # the objm then set the attributes by hand, this bypasses '__init__'
+    #
     @classmethod
     def deserialize_block(cls, o):
         bc = cls.get_instance()
+        # if already of right type, return
         if isinstance(o, bc.block_class):
             return o
 
+        # allocate with an empty constrcutor class
         b = bc.block_class.__new__(bc.block_class)
         b.balances = {}
         b.next_nonce = {}
@@ -92,16 +130,18 @@ class Blockchain(metaclass = BlockchainMeta):
         b.target = bc.pow_target
         b.coinbase_reward = bc.coinbase_reward
 
+        # key matches block.to_json() 
         b.chain_length = int(o['chainlength'])
         b.timestamp = o['timestamp']
 
+        # Python equivalent to o.balances.forEach(([clientID,amount]) => {b.balances.set(clientID, amount);
         if b.is_genesis_block():
             for client_id, amount in o['balances']:
                 b.balances[client_id] = amount
         else:
-            b.prev_block_hash = o['prev_block_hash']
+            b.prev_block_hash = o['prevBlockHash']
             b.proof = o['proof']
-            b.reward_addr = o['reward_addr']
+            b.reward_addr = o['rewardAddr']
             b.transactions = {}
             for tx_id, tx_json in (o.get('transactions') or []):
                 tx = cls.make_transaction(tx_json)
@@ -109,6 +149,7 @@ class Blockchain(metaclass = BlockchainMeta):
 
         return b
 
+    # constrcutor
     def __init__(self, cfg):
         import block as block_module
         import transaction as tx_module
