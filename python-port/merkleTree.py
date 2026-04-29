@@ -35,17 +35,78 @@ class MerkleTree:
         # at the top level, get index 0, which is the root.
         return self._levels[-1][0]
     
+    
     # Checks if tx in in the tree, return true if it is.
     def includes_transaction(self, tx_id):
-        return
+        # check if tree exists
+        if not self._levels:
+            return False
+        
+        # Hash query first, since tree stores the hashes
+        target = utils.hash(tx_id)
+        # check in the leaf level
+        return target in self._levels[0]
+    
     
     # Return the merkle proof for a path from a given tx_id
+    # Just like our lab, but in Python, same functionality
     def get_proof(self, tx_id):
-        return
+        # Check if tree exists
+        if not self._levels:
+            return False
+        
+        # Get hash of leaf and check if it exists in the left level
+        leaf_hash = utils.hash(tx_id)
+        if leaf_hash not in self._levels[0]:
+            return None
+        
+        proof = []
+        index = self._levels[0].index(leaf_hash)
+        
+        # iterate through each level of the tree except the root
+        for level in self._levels[:-1]:
+            # even index = sibling is on the right +1
+            # odd index = sibling is on the left 
+            
+            # Right
+            if index % 2 == 0:
+                sibling_index = index + 1
+                
+                # if node was duplicated (then its an odd count at curr level) so the sibling index is its own index
+                if sibling_index >= len(level):   
+                    sibling_index = index
+                # Right hash
+                proof.append({'hash': level[sibling_index], 'position': 'right'})
+            # Left
+            else:
+                sibling_index = index - 1 
+                proof.append({'hash': level[sibling_index], 'position': 'left'})
+            
+            # Move up to the next level/parent index
+            index = index // 2
+        
+        return proof
+
+                
     
-    # Verify merkle proof
+    # Verify merkle proof without searching the full tree
+    # Needs the txId, proof from get_proof(), and merkle root stored in block header
+    # returns true if valid
+    @staticmethod
     def verify_proof(tx_id, proof, root):
-        return
+        # current leaf
+        curr = utils.hash(tx_id)
+        # go through tree all the way until the root
+        for step in proof:
+            sibling = step['hash']
+            #Left
+            if step['positon'] == 'right':
+                curr = utils.hash(curr + sibling)
+            #Right
+            else:
+                curr == utils.hash(sibling + curr)
+        # if proof completed, but curr != root, then it isnt a valid proof
+        return curr == root
     
     # Build the merkle tree from the bottom up
     # tx_ids is the list of tx id strings
