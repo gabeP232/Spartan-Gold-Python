@@ -2,11 +2,12 @@ import json
 import time
 import utils
 
+from merkleTree import MerkleTree
+import blockchain as bc_module
 class Block:
     def __init__(self, reward_addr = None, prev_block = None, target = None, coinbase_reward = None):
         if target is None or coinbase_reward is None:
             try:
-                import blockchain as bc_module
                 if target is None:
                     target = bc_module.Blockchain.POW_TARGET
                 if coinbase_reward is None:
@@ -29,14 +30,21 @@ class Block:
             winner_balance = self.balance_of(prev_block.reward_addr)
             self.balances[prev_block.reward_addr] = winner_balance + prev_block.total_rewards()
 
-        self.transactions = {}
 
+        ### Adjusted to build a Merkle Tree from the Transactions ###
+        #
+        # Only stores the root hash in the serialized header
+        self.transactions = {}
+        # Empty hash until a transaction is added to the block
+        self.merkle_root = MerkleTree([]).get_root()
+        
         self.chain_length = (prev_block.chain_length + 1) if prev_block else 0
         self.timestamp = int(time.time() * 1000)
 
         self.proof = None
         
         ### Add check for Dynamic Difficulty for POW ###
+        #
         # After all fields are set, check if the block can be adjusted and recalculate the
         # PoW based on how fast the last N blocks were mined
         # Conditions are:
@@ -67,9 +75,20 @@ class Block:
     def total_rewards(self):
         return sum (tx.fee for tx in self.transactions.values()) + self.coinbase_reward
 
+    # Instead of checking if the transaction exists within the block
+    # Now we check through the MerkleTree 
     def contains(self, tx):
-        return tx.id in self.transactions
+        return MerkleTree(list(self.transactions.keys())).includes_transaction(tx.id)
 
+    # function to rebuild the merkle tree from the curr transaction set
+    # then update self.merkle_root
+    def _rebuild_merkle(self):
+        # Runs after every 'add_transaction()' and at the end of 'rerun()'
+        tree = MerkleTree(list(self.transactions.keys()))
+        self.merkle_root = tree.get_root()
+    
+    # Adjusted so that merkle root is stored as well
+    # Also the PoW target for dynamic difficulty
     def to_json(self):
         o = {
             'chainLength': self.chain_length,
@@ -77,17 +96,41 @@ class Block:
         }
         if self.is_genesis_block():
             o['balances'] = list(self.balances.items())
-        else:
-            o['transactions'] = [[tx_id, tx.to_dict()] for tx_id, tx, in self.transactions.items()]
+        else:  
+            o['merkleRoot'] = self.merkle_root
+            o['transactions'] = [[tx_id, tx.to_dict()] for tx_id, tx in self.transactions.items()]
             o['prevBlockHash'] = self.prev_block_hash
             o['proof'] = self.proof
             o['rewardAddr'] = self.reward_addr
+            o['target'] = hex(self.target)
         return o
 
+    # Create the string that gets hashed for PoW
+    #
+    # Unlike in the JS version, the transactions are excluded and the MerkleRoot
+    # is included. Miners now hash the header instead of the full tx list
+    #
     def serialize(self):
-        return json.dumps(self.to_json(), separators = (',', ':'))
+        # Create a header
+        h = {
+            'chainLength': self.chain_length,
+            'timestamp': self.timestamp,
+        }
+        # Check if block is the genesis blockm if it is store the balances here
+        if self.is_genesis_block():
+            h['balances'] = list(self.balances.items()) 
+        else:
+            h['merkleRoot'] = self.merkle_root
+            h['prevBlockHash'] = self.prev_block_hash
+            h['proof'] = self.proof
+            h['rewardAddr'] = self.reward_addr
+            h['target'] = hex(self.target)
+        
+        return json.dumps(h, separators = (',', ':'))
 
-    def add_transactions(self, tx, client = None):
+    # As mentioned before, after every transaction is added
+    # rebuild the merkle tree
+    def add_transaction(self, tx, client = None):
         if tx.id in self.transactions:
             if client:
                 client.log(f"Duplicate transaction {tx.id}.")
@@ -126,8 +169,11 @@ class Block:
             old_balance = self.balance_of(output['address'])
             self.balances[output['address']] = old_balance + output['amount']
 
+        # Rebuild merkle tree
+        self._rebuild_merkle()
         return True
 
+    # Replay the tx against the new parent block
     def rerun(self, prev_block):
         self.balances = dict(prev_block.balances)
         self.next_nonce = dict(prev_block.next_nonce)
@@ -139,7 +185,10 @@ class Block:
         txs = self.transactions
         self.transactions = {}
         for tx in txs.values():
-            if not self.add_transactions(tx):
+            if not self.add_transaction(tx):
                 return False
 
+        # Rebuild merkle root after finished
+        self._rebuild_merkle()
+        
         return True
