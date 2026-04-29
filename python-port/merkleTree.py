@@ -22,11 +22,18 @@ class MerkleTree:
     def __init__(self, tx_ids):
         self._tx_ids = list(tx_ids)
         
-        self._levels = self.build(self._tx_ids)
+        self._levels = self._build(self._tx_ids)
         
     # Return merkle root hash
+    # Changing any tx changes the root, so the header hash needs to change
+    # 64 char hex string
     def get_root(self):
-        return
+        # no transactions so empty
+        if not self._levels:
+            return self.EMPTY_HASH
+        
+        # at the top level, get index 0, which is the root.
+        return self._levels[-1][0]
     
     # Checks if tx in in the tree, return true if it is.
     def includes_transaction(self, tx_id):
