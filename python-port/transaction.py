@@ -42,7 +42,7 @@ class Transaction:
         tx_data = {
             'from': self.from_addr,
             'nonce': self.nonce,
-            'pub_key': self.pub_key,
+            'pubkey': self.pub_key,
             'outputs': self.outputs,
             'fee': self.fee,
             'data': self.data,

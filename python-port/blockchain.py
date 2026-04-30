@@ -84,7 +84,7 @@ class Blockchain(metaclass = BlockchainMeta):
         cls._instance = None
 
 
-    # Production medthods 
+    # Production methods
     @classmethod
     def create_instance(cls, cfg):
         cls._instance = Blockchain(cfg)
@@ -145,6 +145,9 @@ class Blockchain(metaclass = BlockchainMeta):
         if b.is_genesis_block():
             for client_id, amount in o['balances']:
                 b.balances[client_id] = amount
+            # Genesis blocks have no transactions so the Merkle root is always empty.
+            from merkleTree import MerkleTree
+            b.merkle_root = MerkleTree.EMPTY_HASH
         else:
             b.prev_block_hash = o['prevBlockHash']
             b.proof = o['proof']
@@ -158,6 +161,9 @@ class Blockchain(metaclass = BlockchainMeta):
             # After deserializing, verify the received txs produce the actual merkle root
             # If it doesn't then a tx was tampered with.
             from merkleTree import MerkleTree
+
+            # Restore the serialized target so that dynamic difficulty is preserved.
+            b.target = int(o['target'], 16)
             
             # assign to actual merkle root
             b.merkle_root = o.get('merkleRoot', MerkleTree([]).get_root())
@@ -262,7 +268,7 @@ class Blockchain(metaclass = BlockchainMeta):
         
         # Get the block that is exactly 'interval' steps behind the prev_block
         # until it goes to the first block of the window
-        for _ in range(interval - 1):
+        for _ in range(interval):
             parent_hash = window_start.prev_block_hash
             if parent_hash is None:
                 # is genesis, keep curr target 

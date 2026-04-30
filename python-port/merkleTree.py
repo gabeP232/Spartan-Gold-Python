@@ -100,11 +100,11 @@ class MerkleTree:
         for step in proof:
             sibling = step['hash']
             #Left
-            if step['positon'] == 'right':
+            if step['position'] == 'right':
                 curr = utils.hash(curr + sibling)
             #Right
             else:
-                curr == utils.hash(sibling + curr)
+                curr = utils.hash(sibling + curr)
         # if proof completed, but curr != root, then it isnt a valid proof
         return curr == root
     

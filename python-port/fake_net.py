@@ -19,14 +19,21 @@ class FakeNet:
         self.chance_message_fails = chance_message_fails
         self.message_delay_max = message_delay
 
+    # Registers clients to the network.
+    # Clients and Miners are registered by public key.
     def register(self, *client_list):
         for client in client_list:
             self.clients[client.address] = client
 
+    # Broadcasts to all clients within this.clients the message msg and payload o.
     def broadcast(self, msg, o):
         for address in list(self.clients.keys()):
             self.send_message(address, msg, o)
 
+    # Sends message msg and payload o directly to Client name.
+
+    # The message may be lost or delayed, with the probability
+    # defined for this instance.
     def send_message(self, address, msg, o):
         if not isinstance(o, (dict, list)) and not hasattr(o, 'to_json') and not hasattr(o, 'to_dict'):
             raise ValueError(f"Expected an object, got {type(o)}")
@@ -42,5 +49,6 @@ class FakeNet:
         if random.random() > self.chance_message_fails:
             threading.Timer(delay_s, lambda: client.emit(msg, o2)).start()
 
+    # Tests whether a client is registered with the network.
     def recognizes(self, client):
         return client.address in self.clients
