@@ -268,7 +268,7 @@ class Blockchain(metaclass = BlockchainMeta):
         
         # Get the block that is exactly 'interval' steps behind the prev_block
         # until it goes to the first block of the window
-        for _ in range(interval):
+        for _ in range(interval - 1):
             parent_hash = window_start.prev_block_hash
             if parent_hash is None:
                 # is genesis, keep curr target 
