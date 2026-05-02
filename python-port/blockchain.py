@@ -30,7 +30,7 @@ TARGET_BLOCK_TIME = 10000
 
 ###### Fixed Block Size constant #####
 #
-# 1 mb like Bitcoins (might change)
+# 1 mb like Bitcoins
 MAX_BLOCK_SIZE_BYTES = 1000000
 
 
@@ -254,56 +254,56 @@ class Blockchain(metaclass = BlockchainMeta):
             self.initial_balances[c.address] = client_cfg['amount']
     
     
-    ### Implementing Dynamic Difficulty for POW Target ###    
+    ### Implementing Dynamic Difficulty for POW Target ###
     @classmethod
     def calculate_target(cls, prev_block):
         bc = cls.get_instance()
         interval = DIFFICULTY_ADJUSTMENT_INTERVAL
-        
-        # IF not enough history, use default/curr target
+
+        # IF not enough history, keep the parent block's target
         if prev_block.chain_length < interval:
-            return bc.pow_target
-        
+            return prev_block.target
+
         window_start = prev_block
-        
+
         # Get the block that is exactly 'interval' steps behind the prev_block
-        # until it goes to the first block of the window
         for _ in range(interval - 1):
             parent_hash = window_start.prev_block_hash
             if parent_hash is None:
-                # is genesis, keep curr target 
-                return bc.pow_target
-            
+                return prev_block.target
+
             # look up blocks from the first miner
             if bc.miners:
                 window_start = bc.miners[0].blocks.get(parent_hash)
-            else: window_start = None
-    
+            else:
+                window_start = None
+
             if window_start is None:
-                return bc.pow_target
-            
+                return prev_block.target
+
         actual_time_ms = prev_block.timestamp - window_start.timestamp
         expected_time_ms = interval * TARGET_BLOCK_TIME
-        
+
         # To avoid division by 0 if the timestamps might be identical
         if actual_time_ms <= 0:
             actual_time_ms = 1
-        
-        old_target = bc.pow_target
-        
-        #start scaling
+
+        # Derive from the parent block's embedded target (immutable chain state),
+        # not the mutable bc.pow_target. Two miners racing to produce the same
+        # adjustment block will both read the same prev_block.target and compute
+        # the same new_target without interfering with each other.
+        old_target = prev_block.target
+
         # if actual time is bigger, the target increases, and mining is easier
         # if the expected time was exceeded then relax the difficulty
         new_target = old_target * actual_time_ms // expected_time_ms
-        
+
         # Bitcoin clamps it so it doesnt increase by more than 4 in either direction at a time
         new_target = max(new_target, old_target // 4)
         new_target = min(new_target, old_target * 4)
-        
+
         new_target = min(new_target, POW_BASE_TARGET)
-        
-        # Add another clamp for absolute max (no difficulty)
-        bc.pow_target = new_target
+
         return new_target
 
 

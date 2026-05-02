@@ -9,7 +9,14 @@ class Block:
         if target is None or coinbase_reward is None:
             try:
                 if target is None:
-                    target = bc_module.Blockchain.POW_TARGET
+                    # Inherit the parent block's target so each block carries its own
+                    # difficulty in the header (mirrors Bitcoin's design). Using the
+                    # mutable bc.pow_target would cause racing miners to clobber each
+                    # other's adjustment when two blocks at the same height are created.
+                    if prev_block is not None:
+                        target = prev_block.target
+                    else:
+                        target = bc_module.Blockchain.POW_TARGET
                 if coinbase_reward is None:
                     coinbase_reward = bc_module.Blockchain.COINBASE_AMT_ALLOWED
             except Exception:

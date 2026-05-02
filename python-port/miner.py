@@ -36,12 +36,6 @@ class Miner(Client):
             self.transactions.update(tx_set)
  
             # Fixed block size with fee-based transaction selection
-            #
-            # JS original (no size limit):
-            #   this.transactions.forEach((tx) => {
-            #     this.currentBlock.addTransaction(tx, this);
-            #   });
-            #
             # sort mempool by fee-per-byte descending,
             # then greedily add transactions until the block is full.
             # This maximises miner revenue within the block size cap
@@ -64,17 +58,22 @@ class Miner(Client):
  
             # Clear the mempool — accepted txs are now in current_block,
             # rejected/oversized ones are dropped (they'll be rebroadcast).
-            # JS: this.transactions.clear();
             self.transactions.clear()
  
             self.current_block.proof = 0
 
     # Looks for a "proof". It breaks after some time to listen for messages.
 
-    # The 'one_and_done' field is used for testing only; it prevents the findProof method
-    # from looking for the proof again after the first attempt.
+    # The 'one_and_done' field is used for testing only prevents the findProof method
+    # from looking for the proof again
     def find_proof(self, one_and_done = False):
         cb = self.current_block
+        # Guard against the race where start_new_search() has assigned current_block
+        # but hasn't yet set proof = 0 (both are inside the lock, but this read is not).
+        if cb is None or cb.proof is None:
+            if not one_and_done:
+                threading.Timer(0, lambda: self.emit(bc_module.Blockchain.START_MINING)).start()
+            return
         pause_point = cb.proof + self.mining_rounds
         while cb is self.current_block and cb.proof < pause_point:
             with self._lock:
@@ -87,7 +86,7 @@ class Miner(Client):
                     )
                     self.announce_proof()
                     self.receive_block(cb)
-                    return
+                    break  # fall through to emit START_MINING for the next block
             cb.proof += 1
 
         if not one_and_done:

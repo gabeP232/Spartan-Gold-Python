@@ -403,7 +403,8 @@ class TestDynamicPoW:
         old_target = bc.pow_target
         new_target = bc_module.Blockchain.calculate_target(chain[-1])
 
-        # Mining was very fast which means difficulty should increase which means target should decrease
+        # Mining was very slow (1000s per block vs 10s target) so difficulty should decrease
+        # meaning the target threshold increases (easier to find valid hashes)
         assert new_target > old_target
 
     def test_target_clamped_to_pow_base_target(self):
@@ -439,8 +440,11 @@ class TestFixedBlockSize:
         outputs = [{'amount': 1, 'address': 'ffff'}]
         self.base_tx_cfg = {'from': ADDR, 'pubKey': KP['public'], 'outputs': outputs, 'fee': 1}
 
-    def _make_tx(self, nonce):
-        tx = Transaction({**self.base_tx_cfg, 'nonce': nonce})
+    def _make_tx(self, nonce, fee=None):
+        cfg = {**self.base_tx_cfg, 'nonce': nonce}
+        if fee is not None:
+            cfg['fee'] = fee
+        tx = Transaction(cfg)
         tx.sign(KP['private'])
         return tx
 
@@ -472,6 +476,47 @@ class TestFixedBlockSize:
 
         total = sum(tx.byte_size() for tx in b.transactions.values())
         assert total < bc_module.Blockchain.MAX_BLOCK_SIZE_BYTES
+
+    def test_miner_includes_high_fee_tx_and_drops_low_fee_when_block_is_full(self):
+        """When the block size cap allows only one tx, the miner picks the highest fee/byte one."""
+        miner = Miner({'name': 'FeeOrderMiner', 'net': None, 'startingBlock': self.prev_block})
+        miner.log = lambda _: None
+        bc_module.Blockchain.get_instance().miners.append(miner)
+
+        # nonce=0 high-fee, nonce=1 low-fee — fee desc order matches nonce order
+        # so the high-fee tx is a valid first add (nonce=0 == next_nonce)
+        tx_high = self._make_tx(0, fee=1000)
+        tx_low  = self._make_tx(1, fee=1)
+
+        # Allow exactly one transaction by capping at tx_high's byte size.
+        # tx_low would push the block over the limit.
+        original_max = bc_module.Blockchain.MAX_BLOCK_SIZE_BYTES
+        bc_module.Blockchain.MAX_BLOCK_SIZE_BYTES = tx_high.byte_size()
+        try:
+            miner.transactions = {tx_high.id: tx_high, tx_low.id: tx_low}
+            miner.start_new_search()
+            block_txs = miner.current_block.transactions
+            assert tx_high.id in block_txs, "High fee/byte tx must be selected"
+            assert tx_low.id not in block_txs, "Low fee/byte tx must be dropped when block is full"
+        finally:
+            bc_module.Blockchain.MAX_BLOCK_SIZE_BYTES = original_max
+
+    def test_miner_all_txs_included_when_within_size_limit(self):
+        """All transactions are included when their combined size fits in the block."""
+        miner = Miner({'name': 'AllTxMiner', 'net': None, 'startingBlock': self.prev_block})
+        miner.log = lambda _: None
+        bc_module.Blockchain.get_instance().miners.append(miner)
+
+        tx_a = self._make_tx(0, fee=10)
+        tx_b = self._make_tx(1, fee=5)
+        tx_c = self._make_tx(2, fee=1)
+        miner.transactions = {tx_a.id: tx_a, tx_b.id: tx_b, tx_c.id: tx_c}
+        miner.start_new_search()
+
+        block_txs = miner.current_block.transactions
+        assert tx_a.id in block_txs
+        assert tx_b.id in block_txs
+        assert tx_c.id in block_txs
 
 if __name__ == '__main__':
     import sys

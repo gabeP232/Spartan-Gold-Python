@@ -71,6 +71,10 @@ class TcpMiner(Miner):
 
         self.connection = obj.get('connection', {'host': 'localhost', 'port': 9000})
 
+        # False while the CLI menu is open; find_proof() returns immediately
+        # when this is False and does not reschedule itself.
+        self._mining_active = True
+
         # Set up the TCP server socket.
         # JS: this.srvr = net.createServer();
         self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -80,6 +84,21 @@ class TcpMiner(Miner):
         # server loop doesn't block the mining loop.
         # JS: this.srvr.on('connection', (client) => { ... });
         self._server_thread = threading.Thread(target=self._accept_loop, daemon=True)
+
+    def pause_mining(self):
+        self._mining_active = False
+
+    def resume_mining(self):
+        self._mining_active = True
+        threading.Timer(0, lambda: self.emit(bc_module.Blockchain.START_MINING)).start()
+
+    def find_proof(self, one_and_done=False):
+        # When the CLI menu is open, drop the call and do not reschedule.
+        # The current in-flight round (if any) finishes its iterations and
+        # then stops naturally because this guard blocks the next emission.
+        if not self._mining_active:
+            return
+        super().find_proof(one_and_done)
 
     def _accept_loop(self):
         while True:
@@ -111,7 +130,7 @@ class TcpMiner(Miner):
                 # Peer announcement add them to our network map.
                 # If we don't already know them, register back with themso they also have us in their routing table.
                 # JS: if (!this.net.recognizes(o)) this.registerWith(o.connection)
-                if not self.net.recognizes(o):
+                if o.get('address') not in self.net.clients:
                     self.register_with(o.get('connection'))
                 self.log(f"Registering peer {o.get('name')} at {o.get('connection')}")
                 # Store enough info in TcpNet's client map to route future messages.
@@ -207,6 +226,10 @@ class TcpMiner(Miner):
 
 def run_cli(miner):
     while True:
+        # Pause mining for the entire duration of the menu + sub-prompts so
+        # log lines don't race with input() on stdout.
+        miner.pause_mining()
+
         print(f"""
             Funds: {miner.available_gold}
             Address: {miner.address}
@@ -221,6 +244,7 @@ def run_cli(miner):
             *e(x)it without saving?
             """)
         try:
+            sys.stdout.flush()
             answer = input("  Your choice: ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print("\nShutting down.")
@@ -244,6 +268,7 @@ def run_cli(miner):
                 amt = int(amt_str)
             except ValueError:
                 print("  Invalid amount.")
+                miner.resume_mining()
                 continue
             if amt > miner.available_gold:
                 print(f"  ***Insufficient gold. You only have {miner.available_gold}.")
@@ -271,6 +296,9 @@ def run_cli(miner):
 
         else:
             print(f"  Unrecognized choice: {answer}")
+
+        # Resume mining now that the full command (and any sub-prompts) is done.
+        miner.resume_mining()
 
 
 # Entry point
@@ -310,7 +338,13 @@ if __name__ == '__main__':
         'startingBlock': bc.genesis,
     })
 
-    # Silence per-message log spam — same as the JS version.
+    # Route mining output to stderr so it never interferes with input() on stdout.
+    # On Windows, background threads writing to stdout corrupt the terminal line
+    # buffer and cause Enter keystrokes to be swallowed by input().
+    _miner_name = miner.name or name
+    miner.log = lambda msg: print(f"{_miner_name}: {msg}", file=sys.stderr, flush=True) \
+        if 'Found proof' in msg or 'Registering' in msg else None
+
     known_miners = config.get('knownMiners', [])
     miner.initialize(known_miners)
 

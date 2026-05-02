@@ -1,0 +1,14 @@
+{
+    "name": "Mickey",
+    "connection": {
+        "host": "localhost",
+        "port": 9001
+    },
+    "keyPair": null,
+    "knownMiners": [
+        {"host": "localhost", "port": 9000}
+    ],
+    "genesis": {
+        "startingBalances": {"EmoofsmV9kMlYYm5MVNgcVF4XOaXnZhQ/PwH3w++p/8=": 500}
+    }
+}
