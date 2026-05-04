@@ -226,10 +226,6 @@ class TcpMiner(Miner):
 
 def run_cli(miner):
     while True:
-        # Pause mining for the entire duration of the menu + sub-prompts so
-        # log lines don't race with input() on stdout.
-        miner.pause_mining()
-
         print(f"""
             Funds: {miner.available_gold}
             Address: {miner.address}
@@ -268,7 +264,6 @@ def run_cli(miner):
                 amt = int(amt_str)
             except ValueError:
                 print("  Invalid amount.")
-                miner.resume_mining()
                 continue
             if amt > miner.available_gold:
                 print(f"  ***Insufficient gold. You only have {miner.available_gold}.")
@@ -297,10 +292,6 @@ def run_cli(miner):
         else:
             print(f"  Unrecognized choice: {answer}")
 
-        # Resume mining now that the full command (and any sub-prompts) is done.
-        miner.resume_mining()
-
-
 # Entry point
 # Usage: python tcp_miner.py
 if __name__ == '__main__':
@@ -316,10 +307,7 @@ if __name__ == '__main__':
     bc = bc_module.Blockchain.create_instance({
         'blockClass':       Block,
         'transactionClass': Transaction,
-        'clients': [
-            {'name': addr, 'amount': bal}
-            for addr, bal in starting_balances.items()
-        ],
+        'startingBalances': starting_balances,
         'net': TcpNet(),
     })
 
@@ -343,7 +331,7 @@ if __name__ == '__main__':
     # buffer and cause Enter keystrokes to be swallowed by input().
     _miner_name = miner.name or name
     miner.log = lambda msg: print(f"{_miner_name}: {msg}", file=sys.stderr, flush=True) \
-        if 'Found proof' in msg or 'Registering' in msg else None
+        if 'Registering' in msg else None
 
     known_miners = config.get('knownMiners', [])
     miner.initialize(known_miners)
