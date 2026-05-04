@@ -1,23 +1,30 @@
 import threading
 import time
 
+# Patch difficulty constants BEFORE importing blockchain 
+# TARGET_BLOCK_TIME is a module-level constant used directly in calculate_target().
+# We set it to 3000ms (3s per block) so blocks mine faster than the target
+# early on, causing HARDER adjustments, then as difficulty climbs miners slow
+# down below the target and we see EASIER adjustments too.
+# DIFFICULTY_ADJUSTMENT_INTERVAL is set to 5 so we see adjustments more often.
 import blockchain as bc_module
-from miner import Miner
+bc_module.TARGET_BLOCK_TIME = 3000  # 3s target per block
+bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL = 5  # adjust every 5 blocks
+
 from fake_net import FakeNet
 from merkleTree import MerkleTree
-from block import Block
 
-print("  SpartanGold-PE Simulation")
-print("  Demonstrating: Merkle Tree, Dynamic Difficulty, Fixed Block Size with Fee Based Transaction selection")
+print("SpartanGold-Python Simulation")
+print("Demonstrating: Merkle Tree, Dynamic Difficulty, Fee-Based Transaction Selection")
 print()
 
-# Creating genesis block
+# genesis block 
 bc = bc_module.Blockchain.create_instance({
     'clients': [
-        {'name': 'Alice', 'amount': 500, 'mining': False},
+        {'name': 'Alice', 'amount': 2000, 'mining': False},
         {'name': 'Bob', 'amount': 200, 'mining': False},
-        {'name': 'Charlie', 'amount': 100, 'mining': False},
-        {'name': 'Minnie', 'amount': 400, 'mining': True},
+        {'name': 'Charlie','amount': 200, 'mining': False},
+        {'name': 'Minnie','amount': 400, 'mining': True},
         {'name': 'Mickey', 'amount': 300, 'mining': True},
     ],
     'mnemonic': (
@@ -25,14 +32,14 @@ bc = bc_module.Blockchain.create_instance({
         "great similar chief cheap dinner dolphin picture swing twenty two file nuclear"
     ),
     'net': FakeNet(),
-    'powLeadingZeroes': 10,
+    'powLeadingZeroes': 16,
     'confirmedDepth':   2,
 })
 
 alice, bob, charlie = bc.get_clients('Alice', 'Bob', 'Charlie')
-minnie, mickey = bc.get_clients('Minnie', 'Mickey')
+minnie, mickey      = bc.get_clients('Minnie', 'Mickey')
 
-# Suppress "Cutting over" noise from miner logs; keep "Found proof" lines
+# Suppress miner noise; keep only "Found proof" lines
 for _m in [minnie, mickey]:
     _orig_log = _m.log
     _m.log = lambda msg, _o=_orig_log: _o(msg) if 'Found proof' in msg else None
@@ -42,81 +49,96 @@ print("Initial balances:")
 alice.show_all_balances()
 print()
 
-# ==============================
-# FEATURE 1: MERKLE TREE FOR TRANSACTIONS
-# ==============================
-print("=" * 50)
+# FEATURE 1 — MERKLE TREE
 print("FEATURE 1: MERKLE TREE FOR TRANSACTIONS")
-print("=" * 50)
 print()
 
-fake_ids = ["tx_alpha", "tx_beta", "tx_gamma"]
 demo_tree_empty = MerkleTree([])
-demo_tree_full  = MerkleTree(fake_ids)
+demo_tree_full = MerkleTree(["tx_a", "tx_b", "tx_c"])
 
-print(f"Empty block Merkle root (no txs):")
+# Demo an empty merkle tree when there are no txs
+print("Empty block Merkle root (no user txs):")
 print(f"  {demo_tree_empty.get_root()}")
-print(f"Merkle root with 3 transactions:")
+# Show how it changes and is stored when there are txs on the block
+print("Merkle root with 3 transactions:")
 print(f"  {demo_tree_full.get_root()}")
 print(f"Root changed: {demo_tree_empty.get_root() != demo_tree_full.get_root()}")
 print()
 
-proof = demo_tree_full.get_proof("tx_beta")
-root  = demo_tree_full.get_root()
-valid = MerkleTree.verify_proof("tx_beta", proof, root)
-print(f"SPV Proof for 'tx_beta':")
-print(f"  Proof uses {len(proof)} sibling hash(es) to verify membership")
-print(f"  (vs downloading all {len(fake_ids)} transactions)")
-print(f"  Proof valid: {valid}")
+_proof = demo_tree_full.get_proof("tx_b")
+_root  = demo_tree_full.get_root()
+_valid = MerkleTree.verify_proof("tx_b", _proof, _root)
+print("SPV Proof for 'tx_b':")
+print(f"  Proof uses {len(_proof)} sibling hash(es) to verify membership")
+print(f"  (vs downloading all 3 full transactions)")
+print(f"  Proof valid: {_valid}")
 print(f"  At 1000 txs this needs only ~10 hashes — O(log n) verification")
 print()
 
-tampered_tree = MerkleTree(["tx_alpha", "tx_TAMPERED", "tx_gamma"])
-print(f"Tampered tree root matches original: {tampered_tree.get_root() == root}")
+# Builds a second tree where a transaction was changed
+# If the roots match, a tampered transaction went undetected
+_tampered = MerkleTree(["tx_a", "tx_TAMPERED", "tx_c"])
+print(f"Tampered tree root matches original: {_tampered.get_root() == _root}")
+print()
+print("Note: blocks with no user transactions show an all-zero Merkle root.")
+print("This is correct — only user transactions are hashed into the tree.")
+print("Coinbase rewards are tracked in block.balances, not the tx Merkle tree.")
+print("Blocks with user txs will show a unique non-zero root in the live log.")
 print()
 
-# ==============================
-# FEATURE 2: FEE-BASED TRANSACTION SELECTION
-# ==============================
-print("=" * 50)
+# FEATURE 2 — FEE-BASED TRANSACTION SELECTION
 print("FEATURE 2: FEE-BASED TRANSACTION SELECTION")
-print("=" * 50)
 print()
 print(f"Max block size: {bc_module.Blockchain.MAX_BLOCK_SIZE_BYTES:,} bytes")
-print(f"Miners sort mempool by fee/byte descending.")
-print(f"Most profitable transactions are selected first.")
-print(f"Three transactions will be posted 2 seconds after mining starts.")
+print("Miners sort mempool by fee/byte descending.")
+print("Most profitable transactions are selected first.")
+print("Three waves of transactions will be posted at t=1s, t=15s, t=30s.")
 print()
 
-# ==============================
-# FEATURE 3: DYNAMIC DIFFICULTY ADJUSTMENT
-# ==============================
-print("=" * 50)
+# FEATURE 3 — DYNAMIC DIFFICULTY ADJUSTMENT
 print("FEATURE 3: DYNAMIC DIFFICULTY ADJUSTMENT")
-print("=" * 50)
 print()
 
 _initial_zeros = 256 - bc_module.Blockchain.POW_TARGET.bit_length()
 print(f"Adjustment interval: every {bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL} blocks")
-print(f"Target block time:   {bc_module.TARGET_BLOCK_TIME} ms")
-print(f"Initial difficulty:  {_initial_zeros} leading zeros required in hash")
+
+print(f"Target block time: {bc_module.TARGET_BLOCK_TIME} ms ({bc_module.TARGET_BLOCK_TIME // 1000}s per block)")
+
+print(f"Initial difficulty: {_initial_zeros} leading zeros required in hash")
+
+print(f"Window target: {bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL} x {bc_module.TARGET_BLOCK_TIME}ms = "
+      f"{bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL * bc_module.TARGET_BLOCK_TIME // 1000}s")
+
+print("Faster than target -> HARDER  |  Slower than target -> EASIER")
 print()
 print("Starting miners. Watching for blocks and difficulty adjustments...")
 print()
 
-# Number of leading zero bits required for a valid hash at a given target.
-# More zeros = harder; fewer zeros = easier.
+# helpers 
 def _zeros(target):
     return 256 - target.bit_length()
 
-# track per-height targets (dict so duplicates at same height overwrite)
-_block_log    = {}
-# track the height we've already printed a line for (deduplicates racing miners)
+#  tracking state 
+# maps block height and PoW target at that height
+_block_log = {}
+# prevents from printing same block twice, so only display the block Alice accepts into the chain
 _seen_heights = set()
-_prev_target  = [bc_module.Blockchain.POW_TARGET]
-_fee_txs      = {}       # id -> tx; populated by _post_transactions once txs are sent
-_fee_verified = [False]  # set True after first block with our fee txs is seen
+# tracks list of known targets to detect when it changes
+_prev_target = [bc_module.Blockchain.POW_TARGET]
+# maps the tx.id to the tx for every tx posted 
+_all_fee_txs = {}
+# set of tx ids already confirmed, so no reporting twice
+_confirmed = set()
+_lock = threading.Lock()
 
+# block watcher 
+# called every time a block is received
+# For each block
+#   record the blocks PoW target in block log
+#   Skip block if already printed
+#   check if target has changed since last block, then print difficulty if it has
+#   print a summary: block num, tx count, merkle root, difficulty
+#   Check if any fee txs were included in the block and print them in fee/byte order
 _orig_receive = alice.receive_block
 
 def _watch(b):
@@ -124,74 +146,84 @@ def _watch(b):
     if result is None:
         return None
 
-    _block_log[result.chain_length] = result.target
+    h = result.chain_length
+    with _lock:
+        _block_log[h] = result.target
 
-    # Skip printing a second line when the other miner finds the same height
-    if result.chain_length in _seen_heights:
+    if h in _seen_heights:
         return result
-    _seen_heights.add(result.chain_length)
+    _seen_heights.add(h)
 
     zeros = _zeros(result.target)
+
     adjusted = ""
     if result.target != _prev_target[0]:
         prev_z = _zeros(_prev_target[0])
         direction = "HARDER" if result.target < _prev_target[0] else "EASIER"
-        adjusted  = f"  <-- DIFFICULTY ADJUSTED ({direction}: {prev_z} -> {zeros} zeros)"
+        adjusted = f"  <-- DIFFICULTY ADJUSTED ({direction}: {prev_z} -> {zeros} zeros)"
         _prev_target[0] = result.target
 
-    tx_count = len(result.transactions)
+    root = result.merkle_root
+    root_str = root[:10] + "..." if root != "0" * 64 else "[no user txs]  "
+
+    # Print the 
     print(
-        f"  Block {result.chain_length:>2} | "
-        f"txs={tx_count} | "
-        f"merkle={result.merkle_root[:10]}... | "
+        f"  Block {h:>2} | "
+        f"txs={len(result.transactions)} | "
+        f"merkle={root_str} | "
         f"diff={zeros} zeros{adjusted}"
     )
 
-    # Feature 2 live verification: prove fee ordering when our transactions land
-    if _fee_txs and not _fee_verified[0]:
-        matched = {tid: result.transactions[tid]
-                   for tid in _fee_txs if tid in result.transactions}
-        if matched:
-            ordered = sorted(matched.values(),
-                             key=lambda tx: tx.fee / tx.byte_size(), reverse=True)
-            print(f"  >> Fee ordering verified in block {result.chain_length}:")
+    # Show fee txs confirmed in this block, highest fee/byte first
+    with _lock:
+        newly = {
+            tid: result.transactions[tid]
+            for tid in _all_fee_txs
+            if tid in result.transactions and tid not in _confirmed
+        }
+        if newly:
+            ordered = sorted(newly.values(),
+                             key=lambda tx: tx.fee / tx.byte_size(),
+                             reverse=True)
+            print(f"  >> Fee tx(s) confirmed in block {h} (highest fee/byte first):")
             for tx in ordered:
-                print(f"       fee={tx.fee:>3}  size={tx.byte_size()}B  "
-                      f"fee/byte={tx.fee / tx.byte_size():.5f}")
-            _fee_verified[0] = True
+                fpb = tx.fee / tx.byte_size()
+                print(f"       fee={tx.fee:>3}  size={tx.byte_size()}B  fee/byte={fpb:.5f}")
+            _confirmed.update(newly.keys())
+
+            if _confirmed >= set(_all_fee_txs.keys()):
+                print(f"  >> All {len(_all_fee_txs)} fee transactions confirmed")
 
     return result
 
-# Alice registered self.receive_block as her PROOF_FOUND listener in __init__.
-# Patching the attribute alone doesn't intercept event-driven calls; we must
-# swap the listener in the event registry too.
 alice.off(bc_module.Blockchain.PROOF_FOUND, _orig_receive)
 alice.on(bc_module.Blockchain.PROOF_FOUND, _watch)
 alice.receive_block = _watch
 
-
+#final report
 def _final_report():
     print()
-    print("=" * 50)
     print("SIMULATION COMPLETE")
-    print("=" * 50)
     print()
 
     print("Final balances (Alice's perspective):")
     alice.show_all_balances()
     print()
 
-    # Show only the blocks where difficulty changed
+    with _lock:
+        log_snap = dict(_block_log)
+        conf_snap = set(_confirmed)
+        fee_snap = dict(_all_fee_txs)
+
     print("Difficulty adjustment log:")
     prev = None
     adjustments = 0
     first_zeros = None
-    for length, target in sorted(_block_log.items()):
+    for length, target in sorted(log_snap.items()):
         zeros = _zeros(target)
         if first_zeros is None:
             first_zeros = zeros
-            print(f"  Blocks 1-{bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL - 1}: "
-                  f"{zeros} leading zeros (initial difficulty)")
+            print(f"  Blocks 1-{bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL - 1}: {zeros} leading zeros (initial)")
         if prev is not None and target != prev:
             prev_z = _zeros(prev)
             direction = "HARDER" if target < prev else "EASIER"
@@ -203,53 +235,95 @@ def _final_report():
     if adjustments:
         print(f"  Total difficulty adjustments: {adjustments}")
     else:
-        print(f"  No adjustment triggered yet "
-              f"(need {bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL} blocks).")
+        print(f"  No adjustment triggered (need {bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL} blocks per window).")
 
     print()
     print("Features demonstrated:")
     print("  [1] Merkle root replaces full tx list in block header")
-    print("  [1] SPV proof verified in O(log n) without full transaction list")
-    print("  [1] Tampered transaction list changes the Merkle root")
+    print("  [1] Coinbase-only blocks show zero root (user txs only are hashed)")
     print("  [2] Miners sort mempool by fee/byte and fill up to 1 MB cap")
-    if _fee_verified[0]:
-        print("  [2] Fee ordering confirmed live in a mined block")
-    else:
-        print("  [2] Fee ordering not yet confirmed (transactions may not have mined yet)")
+    if conf_snap and fee_snap:
+        ordered = sorted(
+            [fee_snap[tid] for tid in conf_snap if tid in fee_snap],
+            key=lambda tx: tx.fee / tx.byte_size(),
+            reverse=True,
+        )
+        print(f"  [2] Fee ordering confirmed — {len(conf_snap)}/{len(fee_snap)} txs mined in order:")
+        for tx in ordered:
+            fpb = tx.fee / tx.byte_size()
+            print(f"        fee={tx.fee:>3}  size={tx.byte_size()}B  fee/byte={fpb:.5f}")
     print(f"  [3] Dynamic difficulty adjusts every {bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL} blocks "
-          f"toward {bc_module.TARGET_BLOCK_TIME} ms target")
+          f"toward {bc_module.TARGET_BLOCK_TIME}ms target")
 
+# start network
+bc.start(90000, _final_report)
 
-# Run for 45 seconds
-bc.start(45000, _final_report)
+# TRANSACTION WAVES
+#
+# To demonstrate fee-based selection we post transactions in three separate
+# "waves" at different points during the simulation. Each wave is sent from
+# a background thread that sleeps until its scheduled time (delay_s).
+#
+# The t=Ns notation means "N seconds after the simulation starts":
+#   Wave 1 at t=1s  — posted almost immediately so miners see them early.
+#   Wave 2 at t=15s — posted mid-simulation to mix with any leftover Wave 1 txs.
+#   Wave 3 at t=30s — posted later to demonstrate ordering across all three waves.
+#
+# Each wave has 5 transactions with different fees so we can verify the miner
+# always picks the highest fee/byte transaction from whatever is in the mempool.
+#
+# _WAVES is a list of tuples: (delay_in_seconds, list_of_(amount, fee)_pairs).
+_WAVES = [
+    (1,  [(30, 50), (20, 30), (15, 20), (10, 10), (5, 1)]),
+    (15, [(25, 45), (18, 25), (12, 15), (8,  5),  (3, 2)]),
+    (30, [(35, 60), (22, 35), (14, 12), (9,  7),  (4, 3)]),
+]
 
-# Post 3 transactions with different fees after 2 seconds
-def _post_transactions():
-    time.sleep(2)
-    try:
-        print()
-        print("Posting transactions (miners will select by fee/byte):")
-        tx_high = alice.post_transaction(
-            [{'amount': 30, 'address': bob.address}], fee=20
-        )
-        tx_med = alice.post_transaction(
-            [{'amount': 20, 'address': charlie.address}], fee=10
-        )
-        tx_low = alice.post_transaction(
-            [{'amount': 10, 'address': bob.address}], fee=1
-        )
-        print(f"  tx_high -> Bob     fee=20  fee/byte={tx_high.fee/tx_high.byte_size():.5f}")
-        print(f"  tx_med  -> Charlie fee=10  fee/byte={tx_med.fee/tx_med.byte_size():.5f}")
-        print(f"  tx_low  -> Bob     fee=1   fee/byte={tx_low.fee/tx_low.byte_size():.5f}")
-        print(f"  Miners will include tx_high first, tx_med next, tx_low last.")
-        print()
-        _fee_txs[tx_high.id] = tx_high
-        _fee_txs[tx_med.id]  = tx_med
-        _fee_txs[tx_low.id]  = tx_low
-    except Exception as e:
-        print(f"  (Transaction skipped: {e})")
+# We cycle through these recipient addresses so not every transaction goes to
+# the same person.
+_RECIPIENTS = [bob.address, charlie.address, bob.address, charlie.address, bob.address]
 
-threading.Thread(target=_post_transactions, daemon=True).start()
+# After all txs are done and the driver run finishes
+def _post_wave(wave_num, delay_s, outputs_fees):
+    # Sleep until this wave's scheduled time. Because this runs in a daemon
+    # thread, it doesn't block the main thread or the miners.
+    time.sleep(delay_s)
+
+    rows = []
+    for i, (amt, fee) in enumerate(outputs_fees):
+        try:
+            # post_transaction() signs the transaction with Alice's key and broadcasts it to the network so
+            # both Minnie and Mickey see it
+            # We register each tx in _all_fee_txs immediately so _watch can
+            # match it even if a block is found before the loop finishes
+            tx = alice.post_transaction(
+                [{'amount': amt, 'address': _RECIPIENTS[i % len(_RECIPIENTS)]}],
+                fee=fee,
+            )
+            with _lock:
+                _all_fee_txs[tx.id] = tx
+                
+            rows.append((fee, tx.byte_size(), fee / tx.byte_size()))
+            
+        except Exception as e:
+            print(f"  (Wave {wave_num} tx skipped: {e})")
+
+    # Sort and print so we can see what the miner should prefer
+    rows.sort(key=lambda r: r[2], reverse=True)
+    print()
+    print(f"Posting Wave {wave_num} at t={delay_s}s — miners will select by fee/byte:")
+    for fee, sz, fpb in rows:
+        print(f"  fee={fee:>3}  size={sz}B  fee/byte={fpb:.5f}")
+    print()
+
+# Launch each wave in its own daemon thread so they fire independently at
+# their scheduled times without blocking each other or the main loop
+for wave_num, (delay, of) in enumerate(_WAVES, start=1):
+    threading.Thread(
+        target=_post_wave,
+        args=(wave_num, delay, of),
+        daemon=True,
+    ).start()
 
 try:
     while True:
