@@ -33,13 +33,13 @@ bc = bc_module.Blockchain.create_instance({
     ),
     'net': FakeNet(),
     'powLeadingZeroes': 16,
-    'confirmedDepth':   2,
+    'confirmedDepth': 2,
 })
 
 alice, bob, charlie = bc.get_clients('Alice', 'Bob', 'Charlie')
-minnie, mickey      = bc.get_clients('Minnie', 'Mickey')
+minnie, mickey = bc.get_clients('Minnie', 'Mickey')
 
-# Suppress miner noise; keep only "Found proof" lines
+# Suppress miner noise  keep only "Found proof" lines
 for _m in [minnie, mickey]:
     _orig_log = _m.log
     _m.log = lambda msg, _o=_orig_log: _o(msg) if 'Found proof' in msg else None
@@ -58,32 +58,11 @@ demo_tree_full = MerkleTree(["tx_a", "tx_b", "tx_c"])
 
 # Demo an empty merkle tree when there are no txs
 print("Empty block Merkle root (no user txs):")
-print(f"  {demo_tree_empty.get_root()}")
+print(f" {demo_tree_empty.get_root()}")
 # Show how it changes and is stored when there are txs on the block
 print("Merkle root with 3 transactions:")
-print(f"  {demo_tree_full.get_root()}")
+print(f" {demo_tree_full.get_root()}")
 print(f"Root changed: {demo_tree_empty.get_root() != demo_tree_full.get_root()}")
-print()
-
-_proof = demo_tree_full.get_proof("tx_b")
-_root  = demo_tree_full.get_root()
-_valid = MerkleTree.verify_proof("tx_b", _proof, _root)
-print("SPV Proof for 'tx_b':")
-print(f"  Proof uses {len(_proof)} sibling hash(es) to verify membership")
-print(f"  (vs downloading all 3 full transactions)")
-print(f"  Proof valid: {_valid}")
-print(f"  At 1000 txs this needs only ~10 hashes — O(log n) verification")
-print()
-
-# Builds a second tree where a transaction was changed
-# If the roots match, a tampered transaction went undetected
-_tampered = MerkleTree(["tx_a", "tx_TAMPERED", "tx_c"])
-print(f"Tampered tree root matches original: {_tampered.get_root() == _root}")
-print()
-print("Note: blocks with no user transactions show an all-zero Merkle root.")
-print("This is correct — only user transactions are hashed into the tree.")
-print("Coinbase rewards are tracked in block.balances, not the tx Merkle tree.")
-print("Blocks with user txs will show a unique non-zero root in the live log.")
 print()
 
 # FEATURE 2 — FEE-BASED TRANSACTION SELECTION
@@ -160,7 +139,7 @@ def _watch(b):
     if result.target != _prev_target[0]:
         prev_z = _zeros(_prev_target[0])
         direction = "HARDER" if result.target < _prev_target[0] else "EASIER"
-        adjusted = f"  <-- DIFFICULTY ADJUSTED ({direction}: {prev_z} -> {zeros} zeros)"
+        adjusted = f"   DIFFICULTY ADJUSTED ({direction}: {prev_z} -> {zeros} zeros)"
         _prev_target[0] = result.target
 
     root = result.merkle_root
@@ -185,14 +164,14 @@ def _watch(b):
             ordered = sorted(newly.values(),
                              key=lambda tx: tx.fee / tx.byte_size(),
                              reverse=True)
-            print(f"  >> Fee tx(s) confirmed in block {h} (highest fee/byte first):")
+            print(f" -> Fee txs confirmed in block {h}, highest fee/byte first:")
             for tx in ordered:
                 fpb = tx.fee / tx.byte_size()
                 print(f"       fee={tx.fee:>3}  size={tx.byte_size()}B  fee/byte={fpb:.5f}")
             _confirmed.update(newly.keys())
 
             if _confirmed >= set(_all_fee_txs.keys()):
-                print(f"  >> All {len(_all_fee_txs)} fee transactions confirmed")
+                print(f" -> All {len(_all_fee_txs)} fee txs confirmed")
 
     return result
 
@@ -206,7 +185,7 @@ def _final_report():
     print("SIMULATION COMPLETE")
     print()
 
-    print("Final balances (Alice's perspective):")
+    print("Final balances Alice's POV:")
     alice.show_all_balances()
     print()
 
@@ -239,44 +218,40 @@ def _final_report():
 
     print()
     print("Features demonstrated:")
-    print("  [1] Merkle root replaces full tx list in block header")
-    print("  [1] Coinbase-only blocks show zero root (user txs only are hashed)")
-    print("  [2] Miners sort mempool by fee/byte and fill up to 1 MB cap")
+    print(" Merkle root replaces full tx list in block header")
+    print(" Coinbase-only blocks show zero root (user txs only are hashed)")
+    print(" Miners sort mempool by fee/byte and fill up to 1 MB cap")
     if conf_snap and fee_snap:
         ordered = sorted(
             [fee_snap[tid] for tid in conf_snap if tid in fee_snap],
             key=lambda tx: tx.fee / tx.byte_size(),
             reverse=True,
         )
-        print(f"  [2] Fee ordering confirmed — {len(conf_snap)}/{len(fee_snap)} txs mined in order:")
+        print(f" Fee ordering confirmed - {len(conf_snap)}/{len(fee_snap)} txs mined in order:")
         for tx in ordered:
             fpb = tx.fee / tx.byte_size()
-            print(f"        fee={tx.fee:>3}  size={tx.byte_size()}B  fee/byte={fpb:.5f}")
-    print(f"  [3] Dynamic difficulty adjusts every {bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL} blocks "
+            print(f"      fee={tx.fee:>3}  size={tx.byte_size()}B  fee/byte={fpb:.5f}")
+    print(f" Dynamic difficulty adjusts every {bc_module.DIFFICULTY_ADJUSTMENT_INTERVAL} blocks "
           f"toward {bc_module.TARGET_BLOCK_TIME}ms target")
 
-# start network
+# start network for 90 secs
 bc.start(90000, _final_report)
 
 # TRANSACTION WAVES
-#
 # To demonstrate fee-based selection we post transactions in three separate
 # "waves" at different points during the simulation. Each wave is sent from
 # a background thread that sleeps until its scheduled time (delay_s).
 #
 # The t=Ns notation means "N seconds after the simulation starts":
-#   Wave 1 at t=1s  — posted almost immediately so miners see them early.
-#   Wave 2 at t=15s — posted mid-simulation to mix with any leftover Wave 1 txs.
-#   Wave 3 at t=30s — posted later to demonstrate ordering across all three waves.
+# Wave 1 at t=1s, Wave 2 at t=15s, Wave 3 at t=30s 
 #
 # Each wave has 5 transactions with different fees so we can verify the miner
 # always picks the highest fee/byte transaction from whatever is in the mempool.
-#
 # _WAVES is a list of tuples: (delay_in_seconds, list_of_(amount, fee)_pairs).
 _WAVES = [
-    (1,  [(30, 50), (20, 30), (15, 20), (10, 10), (5, 1)]),
-    (15, [(25, 45), (18, 25), (12, 15), (8,  5),  (3, 2)]),
-    (30, [(35, 60), (22, 35), (14, 12), (9,  7),  (4, 3)]),
+    (1, [(30, 50), (20, 30), (15, 20), (10, 10), (5, 1)]),
+    (15, [(25, 45), (18, 25), (12, 15), (8, 5), (3, 2)]),
+    (30, [(35, 60), (22, 35), (14, 12), (9, 7), (4, 3)]),
 ]
 
 # We cycle through these recipient addresses so not every transaction goes to
@@ -306,12 +281,12 @@ def _post_wave(wave_num, delay_s, outputs_fees):
             rows.append((fee, tx.byte_size(), fee / tx.byte_size()))
             
         except Exception as e:
-            print(f"  (Wave {wave_num} tx skipped: {e})")
+            print(f" (Wave {wave_num} tx skipped: {e})")
 
     # Sort and print so we can see what the miner should prefer
     rows.sort(key=lambda r: r[2], reverse=True)
     print()
-    print(f"Posting Wave {wave_num} at t={delay_s}s — miners will select by fee/byte:")
+    print(f"Posting Wave {wave_num} at t={delay_s}s - miners will select by fee/byte:")
     for fee, sz, fpb in rows:
         print(f"  fee={fee:>3}  size={sz}B  fee/byte={fpb:.5f}")
     print()
