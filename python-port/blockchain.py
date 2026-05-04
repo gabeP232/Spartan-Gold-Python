@@ -213,7 +213,7 @@ class Blockchain(metaclass = BlockchainMeta):
         # In python '>>' int right shift is equivalent without BigInt
         self.pow_target = POW_BASE_TARGET >> pow_leading_zeroes
 
-        self.initial_balances = {}
+        self.initial_balances = dict(cfg.get('startingBalances', {}))
 
         # use mnemoic library to get bip-39
         mnemonic = cfg.get('mnemonic')
