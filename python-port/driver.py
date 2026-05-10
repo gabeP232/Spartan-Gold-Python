@@ -65,6 +65,26 @@ print(f" {demo_tree_full.get_root()}")
 print(f"Root changed: {demo_tree_empty.get_root() != demo_tree_full.get_root()}")
 print()
 
+
+_proof = demo_tree_full.get_proof("tx_b")
+_root  = demo_tree_full.get_root()
+_valid = MerkleTree.verify_proof("tx_b", _proof, _root)
+print("Proof for 'tx_b':")
+print(f"  Proof uses {len(_proof)} sibling hash(es) to verify membership")
+print(f"  Proof valid: {_valid}")
+print(f"  At 1000 txs this needs only 10 hashes - O(log n) verification")
+print()
+
+# Builds a second tree where a transaction was changed
+# If the roots match, a tampered transaction went undetected
+_tampered = MerkleTree(["tx_a", "tx_TAMPERED", "tx_c"])
+print("Tamper a transaction, the tree now = [tx_a, tx_TAMPERED, tx_c]")
+print(f"Check if tampered tree root matches original: {_tampered.get_root() == _root}")
+print()
+
+
+
+
 # FEATURE 2 — FEE-BASED TRANSACTION SELECTION
 print("FEATURE 2: FEE-BASED TRANSACTION SELECTION")
 print()
